@@ -7,14 +7,21 @@
 
 
 ##-- REQUIRED LIBRARIES
+library(devtools)
 library(rgeos)              
 library(rgdal)              
 library(raster)            
 library(coda)               
-library(nimble)             
 library(ggplot2)            
 library(R.utils)            
 library(abind)              
+library(nimble)             
+
+Sys.setenv("R_REMOTES_NO_ERRORS_FROM_WARNINGS" = "true")
+install_github(repo = "nimble-dev/nimbleSCR",
+               subdir = "nimbleSCR")
+
+library(nimbleSCR)             
 
 
 ##-- SOURCE THE REQUIRED FUNCTIONS
