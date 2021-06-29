@@ -26,7 +26,7 @@ library(R.utils)
 library(abind)              
 library(nimbleSCR)
 
-## SOURCE THE REQUIRED FUNCTIONS: SimulateAutocorrelatedRaster()
+## SOURCE THE REQUIRED FUNCTIONS
 dir.function <- paste(getwd(), "/FUNC", sep = "") ##--source FUNC directory on your machine
 R.utils::sourceDirectory(dir.function, modifiedOnly = FALSE)
 
@@ -51,7 +51,7 @@ myVars <- list(
   POPULATION = list(N = 250,              # true population size
                     M = 625),             # size of the augmented population: 2.5*N
   DETECTIONS = list(p0 = 0.15,            # baseline detection probability (intercept)   
-                    det.betas.p0 = -.5,   # a factor covariate with 2 levels
+                    det.betas.p0 = -0.5,  # a factor covariate with 2 levels
                     sigma = 1.5,          # the scale parameter
                     phi   = 1000,         # defines the level of spatial autocorrelation: High (0.001), Intermediate (1), Low (1000)
                     det.prop1 = 1)        # the proportion of detectors with higher detectability
@@ -105,7 +105,6 @@ upperHabCoords <- data.frame(coordinates(habitat.sp) + myVars$HABITAT$resolution
 nHabCells <- dim(lowerHabCoords)[1]
 habQualityDims <- dim(habitat.r)[2:1]
 
-
 ### ==== 1.2. GENERATE DETECTORS ====
 det.r <- rasterize(myStudyArea, habitat.r, field = 1) ##--DEFINE A MATRIX WITHOUT THE BUFFER AREA TO CALCULATE N EXCLUDING BUFFER WITHIN THE NIMBLE MODEL
 
@@ -121,7 +120,6 @@ main.detector.sp <- SpatialPointsDataFrame(data.frame(main.detector.xy[,c("x","y
 plot(habitat.r)
 plot(myStudyArea, add = T)
 points(main.detector.sp)
-
 
 ### ==== 1.3. SCALE DETECTORS & HABITAT & UPPER/LOWER COORDINATES FOR HABITAT WINDOWS ====
 scaled <- scaleCoordsToHabitatGrid(coordsData = main.detector.xy,
@@ -144,7 +142,6 @@ for(i in 1:nrow(scaledHabGridCenters)){
                 trunc(scaledHabGridCenters[i,1])+1] <- i
 }#i
 
-
 ### ==== 1.4. CREATE CACHED OBJECTS FOR LESS RESTRICTION ====
 DetectorIndexLESS <- getLocalObjects(habitatMask = habitat.mx,
                                      coords = scaled$coordsDataScaled,
@@ -158,7 +155,7 @@ DetectorIndexLESS <- getLocalObjects(habitatMask = habitat.mx,
 ## ----------------------------------------------------------------------------------------------
 
 #### ==== 2.1. DETECTOR COVARIATE ====
-## simulate autocorrelated rasters: read the function in folder FUNC
+## simulate autocorrelated rasters
 MyDensityRaster <- SimulateAutocorrelatedRaster(sp = main.detector.sp,
                                                 NRaster = 1,
                                                 phi = myVars$DETECTIONS$phi,
@@ -188,7 +185,6 @@ hist(MyDensityRaster[])
 main.detector.sp$detCov <- data.frame(raster::extract(MyDensityRaster, main.detector.sp))[1]
 colnames(main.detector.sp$detCov) <- "detCov"
 
-
 ### ==== 2.2. SIMULATE INDIVIDUAL AC LOCATIONS ====
 ## Sample random (uniform) activity center locations
 simulated.ACS <- sp::spsample(x = raster::aggregate(raster::rasterToPolygons(habitat.r,function(x)x>0)),
@@ -196,7 +192,6 @@ simulated.ACS <- sp::spsample(x = raster::aggregate(raster::rasterToPolygons(hab
                               type = "random")
 
 simulated.ACS$id <- 1:length(simulated.ACS)
-
 
 ### ==== 2.3. SIMULATE DETECTION ARRAY : y.ar ====
 ## EXPORT EXAMPLE STATE SPACE AND DETECTION FIGURES
@@ -215,7 +210,6 @@ p <- p0 * exp(-D * D/(2 * myVars$DETECTIONS$sigma * myVars$DETECTIONS$sigma))
 
 y[] <- apply(p, c(1, 2), function(x) rpois(1, x))
 
-
 ### ==== 2.4. SUBSET TO INDIVIDUALS DETECTED AT LEAST ONE YEAR/DATA SET ==== 
 ## CHECK THE NUMBER OF INIDVIDUALS DETECTED
 detected <- apply(y,1, function(x) sum(x)>0)
@@ -223,7 +217,6 @@ sum(detected)
 
 ## SUBSET UNDETECTED IDS
 y <- y[detected,]
-
 
 ### ==== 2.5. AUGMENT DATA ====
 
@@ -236,11 +229,9 @@ sum(detected) * (1+ this.AF) == myVars$POPULATION$M
 y <- rbind(y, matrix(0, nrow = myVars$POPULATION$M-sum(detected), ncol = dim(y)[2]))
 z <- c(rep(1, sum(detected)), rep(NA,myVars$POPULATION$M-sum(detected)))
 
-
 ### ==== 2.6. TRANSFORM Y TO SPARSE MATRICES =====
 
 SparseY <- getSparseY(y)
-
 
 ### ==== 2.7.   SET THE INPUT FOR NIMBLE ====
 ### ==== 2.7.1. Define the nimble model  ====
@@ -251,14 +242,14 @@ modelCode <- nimbleCode({
   
   ##---- SPATIAL PROCESS 
   for(i in 1:n.individuals){
-    sxy[i, 1:2] ~ dbernPP(
+    sxy[i, 1:2] ~ dbernppAC(
       lowerCoords = lowerHabCoords[1:numHabWindows, 1:2],
       upperCoords = upperHabCoords[1:numHabWindows, 1:2],
-      intensityWeights = mu[1:numHabWindows],
-      sumIntensity = sumIntensity,
-      numPoints = 1,
+      logIntensities = mu[1:numHabWindows],
+      logSumIntensity = sumIntensity,
+      numGridRows = y.max,
+      numGridCols = x.max,
       habitatGrid = habitatGrid[1:y.max,1:x.max])
-    
   }#i
   
   ##---- DEMOGRAPHIC PROCESS
@@ -329,14 +320,13 @@ nimData <- list(
   habitatGrid = habIDCells.mx
 )
 
-
 ### ==== 2.7.4. Define the initial values to be used in the model  ====
 ## Initialise AC locations
-sxy <- MakeInitXY( y = y,
-                   habitat.mx = habitat.mx,
-                   detector.xy = scaled$coordsDataScaled,
-                   IDCells.mx = IDCells.mx,
-                   grid.xy = scaled$coordsHabitatGridCenterScaled)
+sxy <- MakeInitXY(y = y,
+                  habitat.mx = habitat.mx,
+                  detector.xy = scaled$coordsDataScaled,
+                  IDCells.mx = IDCells.mx,
+                  grid.xy = scaled$coordsHabitatGridCenterScaled)
 
 ## Initialise z values
 z.init <- ifelse(!is.na(z), NA, 1)
@@ -349,7 +339,6 @@ nimInits <- list(sigma = runif(1,0,10),
                  psi = runif(1,0,1),
                  sxy = sxy[ , ,1]      
 )
-
 
 ### ==== 2.7.5. Define the parameters to be monitored ====
 nimParams <- c("N","sxy","z","sigma","p0","psi")
@@ -378,11 +367,10 @@ MCMCconf <- configureMCMC(model = model,
 MCMC <- buildMCMC(MCMCconf)
 cMCMC <- compileNimble(MCMC, project = model, resetFunctions = TRUE)
 
-
 ### ==== 3.2. RUN THE MCMC ====
 myNimbleOutput <- runMCMC(mcmc = cMCMC,
                           nburnin = 1, 
-                          niter = 100,#15000  
+                          niter = 1000,#15000  
                           nchains = 3, 
                           samplesAsCodaMCMC = TRUE)
 
